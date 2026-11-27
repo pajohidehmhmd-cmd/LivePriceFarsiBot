@@ -25,16 +25,19 @@ CHANNELS = {
         "items": ["usd", "gold-18k", "coin-emami", "btc", "eth"],
         "hashtag": "#LIVEPRICE",
     },
+
     "dollar": {
         "username": "@dollarliveprice",
         "items": ["usd"],
         "hashtag": "#USD",
     },
+
     "gold": {
         "username": "@goldlivepricefarsi",
-        "items": ["gold-18k", "gold-24k", "gold-mesghal"],
+        "items": ["gold-18k"],
         "hashtag": "#GOLD",
     },
+
     "coin": {
         "username": "@coinlivefarsi",
         "items": [
@@ -46,11 +49,13 @@ CHANNELS = {
         ],
         "hashtag": "#COIN",
     },
+
     "bitcoin": {
         "username": "@bitcoinlivefarsi",
         "items": ["btc"],
         "hashtag": "#BTC",
     },
+
     "ethereum": {
         "username": "@ethereumlivefarsi",
         "items": ["eth"],
@@ -73,7 +78,7 @@ PERSIAN_COIN_NAMES = {
 
 
 # =================================
-# FORMAT NUMBERS
+# NUMBER FORMATTING
 # =================================
 
 def format_number(value, decimals=0):
@@ -109,10 +114,15 @@ def format_item(item, channel_key):
         logging.warning("Stale price skipped: %s", item_id)
         return None
 
-    # Cryptocurrency: numbers and units only
+    # BITCOIN AND ETHEREUM
+    # First: USDT
+    # Second: IRI
+
     if item_id in ("btc", "eth"):
 
-        lines = []
+        lines = [
+            f"<b>{format_number(price, 2)} USDT</b>"
+        ]
 
         price_irt = item.get("price_irt")
 
@@ -121,13 +131,19 @@ def format_item(item, channel_key):
                 f"<b>{format_number(price_irt)} IRI</b>"
             )
 
-        lines.append(
-            f"<b>{format_number(price, 2)} USDT</b>"
+        return "\n\n".join(lines)
+
+    # GOLD CHANNEL: 18K GOLD ONLY
+
+    if channel_key == "gold":
+
+        return (
+            "<b>هر گرم طلای 18 عیار</b>\n\n"
+            f"<b>{format_number(price)} IRI</b>"
         )
 
-        return "\n".join(lines)
+    # COIN CHANNEL: PERSIAN NAMES
 
-    # Coin channel: Persian names are the only exception
     if channel_key == "coin":
 
         name = PERSIAN_COIN_NAMES.get(item_id)
@@ -140,7 +156,8 @@ def format_item(item, channel_key):
             f"{format_number(price)} IRI</b>"
         )
 
-    # All other assets: price and unit only
+    # ALL OTHER ASSETS
+
     currency = get_currency(item.get("unit"))
 
     return (
