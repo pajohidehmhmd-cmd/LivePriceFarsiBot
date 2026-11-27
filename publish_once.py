@@ -11,7 +11,6 @@ from aiogram.enums import ParseMode
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
-
 API_URL = "https://nerkhara.com/api/v1/latest.json"
 
 
@@ -23,7 +22,7 @@ CHANNELS = {
     "mother": {
         "username": "@livepricefarsi",
         "items": ["usd", "gold-18k", "coin-emami", "btc", "eth"],
-        "hashtag": "#LIVEPRICE",
+        "hashtag": None,
     },
 
     "dollar": {
@@ -65,6 +64,19 @@ CHANNELS = {
 
 
 # =================================
+# MOTHER CHANNEL PERSIAN NAMES
+# =================================
+
+MOTHER_NAMES = {
+    "usd": "دلار",
+    "gold-18k": "هر گرم طلای 18 عیار",
+    "coin-emami": "سکه امامی",
+    "btc": "بیت‌کوین",
+    "eth": "اتریوم",
+}
+
+
+# =================================
 # PERSIAN COIN NAMES
 # =================================
 
@@ -82,11 +94,14 @@ PERSIAN_COIN_NAMES = {
 # =================================
 
 def format_number(value, decimals=0):
+
     number = float(str(value).replace(",", ""))
+
     return f"{number:,.{decimals}f}"
 
 
 def get_currency(unit):
+
     unit = str(unit or "IRT").upper()
 
     if unit in ("IRT", "IRR", "TOMAN", "TOMANS", "IRI"):
@@ -115,15 +130,22 @@ def format_item(item, channel_key):
         return None
 
     # BITCOIN AND ETHEREUM
-    # First: USDT
-    # Second: IRI
 
     if item_id in ("btc", "eth"):
 
-        lines = [
-            f"<b>{format_number(price, 2)} USDT</b>"
-        ]
+        lines = []
 
+        if channel_key == "mother":
+            lines.append(
+                f"<b>{MOTHER_NAMES[item_id]}</b>"
+            )
+
+        # First: USDT
+        lines.append(
+            f"<b>{format_number(price, 2)} USDT</b>"
+        )
+
+        # Second: IRI
         price_irt = item.get("price_irt")
 
         if price_irt is not None:
@@ -133,7 +155,7 @@ def format_item(item, channel_key):
 
         return "\n\n".join(lines)
 
-    # GOLD CHANNEL: 18K GOLD ONLY
+    # GOLD CHANNEL
 
     if channel_key == "gold":
 
@@ -142,7 +164,7 @@ def format_item(item, channel_key):
             f"<b>{format_number(price)} IRI</b>"
         )
 
-    # COIN CHANNEL: PERSIAN NAMES
+    # COIN CHANNEL
 
     if channel_key == "coin":
 
@@ -156,7 +178,23 @@ def format_item(item, channel_key):
             f"{format_number(price)} IRI</b>"
         )
 
-    # ALL OTHER ASSETS
+    # MOTHER CHANNEL
+
+    if channel_key == "mother":
+
+        name = MOTHER_NAMES.get(item_id)
+
+        if not name:
+            return None
+
+        currency = get_currency(item.get("unit"))
+
+        return (
+            f"<b>{name}</b>\n\n"
+            f"<b>{format_number(price)} {currency}</b>"
+        )
+
+    # OTHER CHANNELS
 
     currency = get_currency(item.get("unit"))
 
@@ -210,7 +248,9 @@ def build_message(channel_key, prices):
         item = prices.get(item_id)
 
         if not item:
-            logging.warning("Price not found: %s", item_id)
+            logging.warning(
+                "Price not found: %s", item_id
+            )
             continue
 
         formatted = format_item(item, channel_key)
@@ -223,9 +263,15 @@ def build_message(channel_key, prices):
             f"No valid prices for {channel_key}"
         )
 
-    sections.append(channel["hashtag"])
+    if channel["hashtag"]:
+        sections.append(channel["hashtag"])
 
-    return "\n\n".join(sections)
+    message = "\n\n".join(sections)
+
+    # Extra spacing in ALL six channels
+    message = "\n" + message
+
+    return message
 
 
 # =================================
@@ -278,7 +324,9 @@ async def publish_all():
                     channel["username"]
                 )
 
-        print(f"Successful channels: {successful}/6")
+        print(
+            f"Successful channels: {successful}/6"
+        )
 
         if failed:
             raise RuntimeError(
