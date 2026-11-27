@@ -2,45 +2,37 @@
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone, timedelta
+import html
 
 import httpx
 from dotenv import load_dotenv
 from aiogram import Bot
+from aiogram.enums import ParseMode
 
 load_dotenv()
-
-# ==============================
-# SETTINGS
-# ==============================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 API_URL = "https://nerkhara.com/api/v1/latest.json"
 
-TEHRAN_TZ = timezone(timedelta(hours=3, minutes=30))
-
 CHANNELS = {
     "mother": {
         "username": "@livepricefarsi",
         "title": "تابلو جامع قیمت فارسی",
-        "items": [
-            "usd",
-            "gold-18k",
-            "coin-emami",
-            "btc",
-            "eth",
-        ],
+        "items": ["usd", "gold-18k", "coin-emami", "btc", "eth"],
+        "hashtags": "#USD #GOLD #COIN #BTC #ETH",
     },
     "dollar": {
         "username": "@dollarliveprice",
         "title": "قیمت دلار",
         "items": ["usd"],
+        "hashtags": "#USD",
     },
     "gold": {
         "username": "@goldlivepricefarsi",
         "title": "قیمت طلا",
         "items": ["gold-18k", "gold-24k", "gold-mesghal"],
+        "hashtags": "#GOLD",
     },
     "coin": {
         "username": "@coinlivefarsi",
@@ -52,23 +44,22 @@ CHANNELS = {
             "coin-quarter",
             "coin-gram",
         ],
+        "hashtags": "#COIN",
     },
     "bitcoin": {
         "username": "@bitcoinlivefarsi",
-        "title": "قیمت بیت کوین",
+        "title": "قیمت بیت‌کوین",
         "items": ["btc"],
+        "hashtags": "#BTC",
     },
     "ethereum": {
         "username": "@ethereumlivefarsi",
         "title": "قیمت اتریوم",
         "items": ["eth"],
+        "hashtags": "#ETH",
     },
 }
 
-
-# ==============================
-# HELPERS
-# ==============================
 
 def persian_digits(text):
     digits = "۰۱۲۳۴۵۶۷۸۹"
@@ -81,29 +72,12 @@ def format_number(value, decimals=0):
     return f"{float(value):,.{decimals}f}"
 
 
-def get_update_time(item, fallback=None):
-    value = item.get("updated_utc") or fallback
+def format_item(item):
 
-    if not value:
-        return "نامشخص"
-
-    try:
-        dt = datetime.fromisoformat(
-            value.replace("Z", "+00:00")
-        )
-
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-
-        return dt.astimezone(TEHRAN_TZ).strftime("%H:%M")
-    except (ValueError, TypeError):
-        return "نامشخص"
-
-
-def format_item(item, fallback_time=None):
     item_id = item.get("id", "")
 
     name_data = item.get("name", {})
+
     if isinstance(name_data, dict):
         name = name_data.get("fa", item_id)
     else:
@@ -112,27 +86,31 @@ def format_item(item, fallback_time=None):
     price = item.get("price")
 
     if price is None:
-        return []
+        return ""
 
-    lines = []
+    if item.get("stale"):
+        logging.warning("Skipping stale price: %s", item_id)
+        return ""
 
-    # Cryptocurrency prices
+    name = html.escape(str(name))
+
+    lines = [f"<b>{name}</b>"]
+
     if item_id in ("btc", "eth"):
 
         price_irt = item.get("price_irt")
 
         if price_irt is not None:
             lines.append(
-                f"💰 قیمت بازار ایران: "
-                f"{format_number(price_irt)} تومان"
+                f"ایران: <b>{format_number(price_irt)} تومان</b>"
             )
 
         lines.append(
-            f"🌍 قیمت جهانی: "
-            f"{format_number(price, 2)} تتر"
+            f"جهانی: <b>{format_number(price, 2)} تتر</b>"
         )
 
     else:
+
         unit = item.get("unit", "IRT")
 
         if unit == "IRT":
@@ -142,36 +120,14 @@ def format_item(item, fallback_time=None):
         elif unit == "USDT":
             unit_text = "تتر"
         else:
-            unit_text = unit
+            unit_text = html.escape(str(unit))
 
         lines.append(
-            f"💰 قیمت: {format_number(price)} {unit_text}"
+            f"<b>{format_number(price)} {unit_text}</b>"
         )
 
-    change = item.get("change_pct")
+    return "\n".join(lines)
 
-    if change is not None:
-        sign = "+" if float(change) > 0 else ""
-        lines.append(
-            f"📈 تغییر ۲۴ ساعته: {sign}{change}%"
-        )
-
-    update_time = get_update_time(item, fallback_time)
-
-    lines.append(f"🕒 آخرین به‌روزرسانی: {update_time}")
-
-    if item.get("stale"):
-        lines.append("⚠️ هشدار: اطلاعات این نرخ قدیمی است.")
-
-    return [
-        f"🔹 {name}",
-        *lines,
-    ]
-
-
-# ==============================
-# FETCH PRICES
-# ==============================
 
 async def fetch_prices():
 
@@ -190,25 +146,19 @@ async def fetch_prices():
     items = data.get("items")
 
     if not isinstance(items, list) or not items:
-        raise RuntimeError(
-            "Invalid response from NerkhAra API"
-        )
+        raise RuntimeError("Invalid API response")
 
     return {
         item["id"]: item
         for item in items
         if isinstance(item, dict) and item.get("id")
-    }, data.get("generated_utc")
+    }
 
 
-# ==============================
-# BUILD MESSAGES
-# ==============================
-
-def build_message(title, item_ids, prices, generated_time):
+def build_message(title, item_ids, prices, hashtags):
 
     sections = [
-        f"📊 {title}",
+        f"<b>{html.escape(title)}</b>",
         "━━━━━━━━━━━━━━━━━━",
         "",
     ]
@@ -220,16 +170,14 @@ def build_message(title, item_ids, prices, generated_time):
         item = prices.get(item_id)
 
         if not item:
-            logging.warning(
-                "Price not found: %s", item_id
-            )
+            logging.warning("Price not found: %s", item_id)
             continue
 
-        formatted = format_item(item, generated_time)
+        formatted = format_item(item)
 
         if formatted:
-            sections.extend(formatted)
-            sections.extend(["", "━━━━━━━━━━━━━━━━━━", ""])
+            sections.append(formatted)
+            sections.append("")
             found += 1
 
     if found == 0:
@@ -238,26 +186,19 @@ def build_message(title, item_ids, prices, generated_time):
         )
 
     sections.extend([
-        "📌 واحد قیمت‌ها مطابق واحد درج‌شده است.",
-        "📡 منبع اطلاعات: NerkhAra",
-        "🔗 https://nerkhara.com",
-        "",
-        "⚠️ قیمت‌ها صرفاً جهت اطلاع‌رسانی هستند.",
+        "━━━━━━━━━━━━━━━━━━",
+        hashtags,
     ])
 
     return persian_digits("\n".join(sections))
 
-
-# ==============================
-# PUBLISH TO TELEGRAM
-# ==============================
 
 async def publish_all():
 
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN is missing")
 
-    prices, generated_time = await fetch_prices()
+    prices = await fetch_prices()
 
     bot = Bot(token=BOT_TOKEN)
 
@@ -266,13 +207,13 @@ async def publish_all():
 
     try:
 
-        for key, channel in CHANNELS.items():
+        for channel in CHANNELS.values():
 
             message = build_message(
                 channel["title"],
                 channel["items"],
                 prices,
-                generated_time,
+                channel["hashtags"],
             )
 
             try:
@@ -280,6 +221,7 @@ async def publish_all():
                 await bot.send_message(
                     chat_id=channel["username"],
                     text=message,
+                    parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
 
@@ -290,7 +232,7 @@ async def publish_all():
                     channel["username"],
                 )
 
-            except Exception as error:
+            except Exception:
 
                 failed.append(channel["username"])
 
@@ -309,10 +251,6 @@ async def publish_all():
     finally:
         await bot.session.close()
 
-
-# ==============================
-# MAIN
-# ==============================
 
 async def main():
 
