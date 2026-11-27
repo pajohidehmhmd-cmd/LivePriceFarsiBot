@@ -2,7 +2,6 @@
 import asyncio
 import logging
 import os
-import html
 
 import httpx
 from dotenv import load_dotenv
@@ -11,32 +10,40 @@ from aiogram.enums import ParseMode
 
 load_dotenv()
 
+# =================================
+# SETTINGS
+# =================================
+
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 API_URL = "https://nerkhara.com/api/v1/latest.json"
 
+
+# =================================
+# CHANNELS
+# =================================
+
 CHANNELS = {
     "mother": {
         "username": "@livepricefarsi",
-        "title": "تابلو جامع قیمت فارسی",
         "items": ["usd", "gold-18k", "coin-emami", "btc", "eth"],
-        "hashtags": "#USD #GOLD #COIN #BTC #ETH",
+        "hashtag": "#LIVEPRICE",
     },
+
     "dollar": {
         "username": "@dollarliveprice",
-        "title": "قیمت دلار",
         "items": ["usd"],
-        "hashtags": "#USD",
+        "hashtag": "#USD",
     },
+
     "gold": {
         "username": "@goldlivepricefarsi",
-        "title": "قیمت طلا",
         "items": ["gold-18k", "gold-24k", "gold-mesghal"],
-        "hashtags": "#GOLD",
+        "hashtag": "#GOLD",
     },
+
     "coin": {
         "username": "@coinlivefarsi",
-        "title": "قیمت ارز و سکه",
         "items": [
             "coin-emami",
             "coin-bahar-azadi",
@@ -44,90 +51,138 @@ CHANNELS = {
             "coin-quarter",
             "coin-gram",
         ],
-        "hashtags": "#COIN",
+        "hashtag": "#COIN",
     },
+
     "bitcoin": {
         "username": "@bitcoinlivefarsi",
-        "title": "قیمت بیت‌کوین",
         "items": ["btc"],
-        "hashtags": "#BTC",
+        "hashtag": "#BTC",
     },
+
     "ethereum": {
         "username": "@ethereumlivefarsi",
-        "title": "قیمت اتریوم",
         "items": ["eth"],
-        "hashtags": "#ETH",
+        "hashtag": "#ETH",
     },
 }
 
 
-def persian_digits(text):
-    digits = "۰۱۲۳۴۵۶۷۸۹"
-    return str(text).translate(
-        str.maketrans("0123456789", digits)
-    )
+# =================================
+# ASSET NAMES
+# =================================
 
+ENGLISH_NAMES = {
+    "usd": "USD",
+    "gold-18k": "18K Gold",
+    "gold-24k": "24K Gold",
+    "gold-mesghal": "Gold Mesghal",
+    "coin-emami": "Emami Coin",
+    "coin-bahar-azadi": "Bahar Azadi Coin",
+    "coin-half": "Half Coin",
+    "coin-quarter": "Quarter Coin",
+    "coin-gram": "Gram Coin",
+    "btc": "Bitcoin",
+    "eth": "Ethereum",
+}
+
+PERSIAN_COIN_NAMES = {
+    "coin-emami": "سکه امامی",
+    "coin-bahar-azadi": "سکه بهار آزادی",
+    "coin-half": "نیم سکه",
+    "coin-quarter": "ربع سکه",
+    "coin-gram": "سکه گرمی",
+}
+
+
+# =================================
+# NUMBER FORMATTING
+# =================================
 
 def format_number(value, decimals=0):
-    return f"{float(value):,.{decimals}f}"
+
+    number = float(str(value).replace(",", ""))
+
+    return f"{number:,.{decimals}f}"
 
 
-def format_item(item):
+def get_currency(unit):
+
+    unit = str(unit or "IRT").upper()
+
+    if unit in ("IRT", "IRR", "TOMAN", "TOMANS", "IRI"):
+        return "IRI"
+
+    if unit in ("USD", "USDT"):
+        return "USDT"
+
+    return unit
+
+
+# =================================
+# FORMAT PRICE ITEMS
+# =================================
+
+def format_item(item, channel_key):
 
     item_id = item.get("id", "")
-
-    name_data = item.get("name", {})
-
-    if isinstance(name_data, dict):
-        name = name_data.get("fa", item_id)
-    else:
-        name = str(name_data or item_id)
-
     price = item.get("price")
 
     if price is None:
-        return ""
+        return None
 
     if item.get("stale"):
         logging.warning("Skipping stale price: %s", item_id)
-        return ""
+        return None
 
-    name = html.escape(str(name))
-
-    lines = [f"<b>{name}</b>"]
-
+    # Cryptocurrency
     if item_id in ("btc", "eth"):
+
+        name = ENGLISH_NAMES[item_id]
+
+        lines = [
+            f"<b>{name}</b>"
+        ]
 
         price_irt = item.get("price_irt")
 
         if price_irt is not None:
             lines.append(
-                f"ایران: <b>{format_number(price_irt)} تومان</b>"
+                f"{format_number(price_irt)} IRI"
             )
 
         lines.append(
-            f"جهانی: <b>{format_number(price, 2)} تتر</b>"
+            f"{format_number(price, 2)} USDT"
+        )
+
+        return "\n".join(lines)
+
+    # Coin channel: Persian names
+    if channel_key == "coin":
+
+        name = PERSIAN_COIN_NAMES.get(
+            item_id,
+            item_id
         )
 
     else:
 
-        unit = item.get("unit", "IRT")
-
-        if unit == "IRT":
-            unit_text = "تومان"
-        elif unit == "USD":
-            unit_text = "دلار"
-        elif unit == "USDT":
-            unit_text = "تتر"
-        else:
-            unit_text = html.escape(str(unit))
-
-        lines.append(
-            f"<b>{format_number(price)} {unit_text}</b>"
+        name = ENGLISH_NAMES.get(
+            item_id,
+            item_id
         )
 
-    return "\n".join(lines)
+    currency = get_currency(item.get("unit"))
 
+    return (
+        f"<b>{name}</b>\n"
+        f"{format_number(price)} {currency}"
+    )
+
+
+# =================================
+# FETCH PRICES
+# =================================
 
 async def fetch_prices():
 
@@ -139,6 +194,7 @@ async def fetch_prices():
     ) as client:
 
         response = await client.get(API_URL)
+
         response.raise_for_status()
 
         data = response.json()
@@ -146,57 +202,69 @@ async def fetch_prices():
     items = data.get("items")
 
     if not isinstance(items, list) or not items:
-        raise RuntimeError("Invalid API response")
+        raise RuntimeError(
+            "Invalid API response"
+        )
 
-    return {
+    prices = {
         item["id"]: item
         for item in items
         if isinstance(item, dict) and item.get("id")
     }
 
+    return prices
 
-def build_message(title, item_ids, prices, hashtags):
 
-    sections = [
-        f"<b>{html.escape(title)}</b>",
-        "━━━━━━━━━━━━━━━━━━",
-        "",
-    ]
+# =================================
+# BUILD TELEGRAM MESSAGE
+# =================================
 
-    found = 0
+def build_message(channel_key, prices):
 
-    for item_id in item_ids:
+    channel = CHANNELS[channel_key]
+
+    sections = []
+
+    for item_id in channel["items"]:
 
         item = prices.get(item_id)
 
         if not item:
-            logging.warning("Price not found: %s", item_id)
+            logging.warning(
+                "Price not found: %s",
+                item_id
+            )
             continue
 
-        formatted = format_item(item)
+        formatted = format_item(
+            item,
+            channel_key
+        )
 
         if formatted:
             sections.append(formatted)
-            sections.append("")
-            found += 1
 
-    if found == 0:
+    if not sections:
         raise RuntimeError(
-            f"No valid prices available for {title}"
+            f"No valid prices for {channel_key}"
         )
 
-    sections.extend([
-        "━━━━━━━━━━━━━━━━━━",
-        hashtags,
-    ])
+    # Channel-specific hashtag
+    sections.append(channel["hashtag"])
 
-    return persian_digits("\n".join(sections))
+    return "\n\n".join(sections)
 
+
+# =================================
+# PUBLISH TO TELEGRAM
+# =================================
 
 async def publish_all():
 
     if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN is missing")
+        raise RuntimeError(
+            "BOT_TOKEN is missing"
+        )
 
     prices = await fetch_prices()
 
@@ -207,16 +275,14 @@ async def publish_all():
 
     try:
 
-        for channel in CHANNELS.values():
-
-            message = build_message(
-                channel["title"],
-                channel["items"],
-                prices,
-                channel["hashtags"],
-            )
+        for channel_key, channel in CHANNELS.items():
 
             try:
+
+                message = build_message(
+                    channel_key,
+                    prices
+                )
 
                 await bot.send_message(
                     chat_id=channel["username"],
@@ -229,19 +295,23 @@ async def publish_all():
 
                 logging.info(
                     "Published successfully: %s",
-                    channel["username"],
+                    channel["username"]
                 )
 
             except Exception:
 
-                failed.append(channel["username"])
+                failed.append(
+                    channel["username"]
+                )
 
                 logging.exception(
                     "Publishing failed: %s",
-                    channel["username"],
+                    channel["username"]
                 )
 
-        print(f"Successful channels: {successful}/6")
+        print(
+            f"Successful channels: {successful}/6"
+        )
 
         if failed:
             raise RuntimeError(
@@ -249,21 +319,28 @@ async def publish_all():
             )
 
     finally:
+
         await bot.session.close()
 
+
+# =================================
+# MAIN
+# =================================
 
 async def main():
 
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
+        format="%(asctime)s - %(levelname)s - %(message)s"
     )
 
     print("Live Price Farsi Bot started.")
 
     await publish_all()
 
-    print("All six channels updated successfully.")
+    print(
+        "All six channels updated successfully."
+    )
 
 
 if __name__ == "__main__":
