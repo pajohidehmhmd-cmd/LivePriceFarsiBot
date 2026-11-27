@@ -1,0 +1,22 @@
+# Secret credentials
+.env
+.env.*
+!.env.example
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Logs
+logs/
+
+# Local databases
+data/*.db
+data/*.sqlite3
+
+# Testing cache
+.pytest_cache/
